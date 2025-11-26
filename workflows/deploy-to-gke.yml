@@ -173,21 +173,23 @@ jobs:
         run: |
           ENV=${{ needs.setup.outputs.environment }}
           
-          # Determine k8s script directory
-          if [[ "$ENV" == "prod" ]]; then
-            K8S_DIR="k8s-script-test"
+          # Determine k8s script directory based on environment
+          if [[ "$ENV" == "prod" ]] || [[ "$ENV" == "test" ]]; then
+            K8S_BASE="k8s-script-test/deploy/cedefi"
           else
-            K8S_DIR="k8s-script-dev"
+            K8S_BASE="k8s-script-dev/deploy/cedefi"
           fi
           
-          # Apply configurations
-          if [[ -d "$K8S_DIR" ]]; then
-            kubectl apply -f $K8S_DIR/namespace.yaml || true
-            kubectl apply -f $K8S_DIR/configmap/ -n cedefi-$ENV || true
-            kubectl apply -f $K8S_DIR/secret/ -n cedefi-$ENV || true
-            kubectl apply -f $K8S_DIR/deploy/ -n cedefi-$ENV
-            kubectl apply -f $K8S_DIR/service/ -n cedefi-$ENV || true
-            kubectl apply -f $K8S_DIR/ingress/ -n cedefi-$ENV || true
+          # Create namespace if not exists
+          kubectl create namespace cedefi-$ENV --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply configurations in order
+          if [[ -d "$K8S_BASE" ]]; then
+            [[ -d "$K8S_BASE/configmap" ]] && kubectl apply -f $K8S_BASE/configmap/ -n cedefi-$ENV || true
+            [[ -d "$K8S_BASE/secret" ]] && kubectl apply -f $K8S_BASE/secret/ -n cedefi-$ENV || true
+            [[ -d "$K8S_BASE/deployment" ]] && kubectl apply -f $K8S_BASE/deployment/ -n cedefi-$ENV
+            [[ -d "$K8S_BASE/service" ]] && kubectl apply -f $K8S_BASE/service/ -n cedefi-$ENV || true
+            [[ -d "$K8S_BASE/ingress" ]] && kubectl apply -f $K8S_BASE/ingress/ -n cedefi-$ENV || true
           fi
 
       - name: Verify Deployment
