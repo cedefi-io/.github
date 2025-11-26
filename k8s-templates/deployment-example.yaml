@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cedefi-api
+  labels:
+    app: cedefi-api
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cedefi-api
+  template:
+    metadata:
+      labels:
+        app: cedefi-api
+        version: v1
+    spec:
+      containers:
+      - name: cedefi-api
+        image: gcr.io/YOUR_PROJECT_ID/cedefi-api:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: ENV
+          value: "prod"
+        - name: LOG_LEVEL
+          value: "info"
+        envFrom:
+        - configMapRef:
+            name: cedefi-api-config
+        - secretRef:
+            name: cedefi-api-secret
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cedefi-api
+  labels:
+    app: cedefi-api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: cedefi-api
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cedefi-api-config
+data:
+  DATABASE_HOST: "postgresql-service"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "cedefi"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  KAFKA_BROKERS: "kafka-service:9092"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cedefi-api-secret
+type: Opaque
+stringData:
+  DATABASE_USER: "your_db_user"
+  DATABASE_PASSWORD: "your_db_password"
+  REDIS_PASSWORD: "your_redis_password"
+  JWT_SECRET: "your_jwt_secret"

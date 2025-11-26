@@ -1,0 +1,208 @@
+name: Build and Deploy to GKE
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'cedefi-api/**'
+      - 'cedefi-order/**'
+      - 'cedefi-job/**'
+      - 'cedefi-evm-indexer/**'
+      - 'cedefi-evm-trade/**'
+      - 'cedefi-solana-indexer/**'
+      - 'cedefi-solana-trade/**'
+      - 'cedefi-solana-ticks/**'
+      - 'cedefi-kline-compose/**'
+      - 'cedefi-rpc/**'
+      - 'k8s-script-*/**'
+      - '.github/workflows/deploy-to-gke.yml'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to deploy (all/cedefi-api/cedefi-order/...)'
+        required: true
+        default: 'all'
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER_NAME: ${{ secrets.GKE_CLUSTER_NAME }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  REGISTRY: gcr.io
+
+jobs:
+  setup:
+    name: Setup Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get Changed Services
+        id: set-matrix
+        run: |
+          ALL_SERVICES='["cedefi-api","cedefi-order","cedefi-job","cedefi-evm-indexer","cedefi-evm-trade","cedefi-solana-indexer","cedefi-solana-trade","cedefi-solana-ticks","cedefi-kline-compose","cedefi-rpc"]'
+          
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ github.event.inputs.service }}" == "all" ]]; then
+              echo "matrix={\"service\":$ALL_SERVICES}" >> $GITHUB_OUTPUT
+            else
+              echo "matrix={\"service\":[\"${{ github.event.inputs.service }}\"]}" >> $GITHUB_OUTPUT
+            fi
+          else
+            CHANGED_SERVICES='[]'
+            for service in cedefi-api cedefi-order cedefi-job cedefi-evm-indexer cedefi-evm-trade cedefi-solana-indexer cedefi-solana-trade cedefi-solana-ticks cedefi-kline-compose cedefi-rpc; do
+              if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "^${service}/"; then
+                CHANGED_SERVICES=$(echo $CHANGED_SERVICES | jq -c ". += [\"$service\"]")
+              fi
+            done
+            
+            if [[ "$CHANGED_SERVICES" == "[]" ]]; then
+              echo "matrix={\"service\":$ALL_SERVICES}" >> $GITHUB_OUTPUT
+            else
+              echo "matrix={\"service\":$CHANGED_SERVICES}" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  build-and-push:
+    name: Build and Push ${{ matrix.service }}
+    needs: setup
+    if: ${{ needs.setup.outputs.matrix != '{"service":[]}' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Generate Image Tag
+        id: image-tag
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "tag=${{ needs.setup.outputs.environment }}-${SHORT_SHA}-${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "short_tag=${{ needs.setup.outputs.environment }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ matrix.service }}:${{ steps.image-tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ matrix.service }}:${{ steps.image-tag.outputs.short_tag }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ matrix.service }}:${{ needs.setup.outputs.environment }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.image-tag.outputs.tag }}
+            BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            GIT_COMMIT=${{ github.sha }}
+
+      - name: Output Image Info
+        run: |
+          echo "Image: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ matrix.service }}:${{ steps.image-tag.outputs.tag }}"
+          echo "service=${{ matrix.service }}" >> $GITHUB_ENV
+          echo "image_tag=${{ steps.image-tag.outputs.tag }}" >> $GITHUB_ENV
+
+  deploy:
+    name: Deploy to GKE
+    needs: [setup, build-and-push]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} \
+            --zone ${{ env.GKE_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Deploy to GKE
+        run: |
+          ENV=${{ needs.setup.outputs.environment }}
+          
+          # Determine k8s script directory
+          if [[ "$ENV" == "prod" ]]; then
+            K8S_DIR="k8s-script-test"
+          else
+            K8S_DIR="k8s-script-dev"
+          fi
+          
+          # Apply configurations
+          if [[ -d "$K8S_DIR" ]]; then
+            kubectl apply -f $K8S_DIR/namespace.yaml || true
+            kubectl apply -f $K8S_DIR/configmap/ -n cedefi-$ENV || true
+            kubectl apply -f $K8S_DIR/secret/ -n cedefi-$ENV || true
+            kubectl apply -f $K8S_DIR/deploy/ -n cedefi-$ENV
+            kubectl apply -f $K8S_DIR/service/ -n cedefi-$ENV || true
+            kubectl apply -f $K8S_DIR/ingress/ -n cedefi-$ENV || true
+          fi
+
+      - name: Verify Deployment
+        run: |
+          ENV=${{ needs.setup.outputs.environment }}
+          kubectl rollout status deployment -n cedefi-$ENV --timeout=5m || true
+          kubectl get pods -n cedefi-$ENV
+          kubectl get svc -n cedefi-$ENV
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **GKE Cluster**: ${{ env.GKE_CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployed Services" >> $GITHUB_STEP_SUMMARY
+          kubectl get deployments -n cedefi-${{ needs.setup.outputs.environment }} -o wide >> $GITHUB_STEP_SUMMARY || true

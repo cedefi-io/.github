@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cedefi-dev
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cedefi-test
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cedefi-prod

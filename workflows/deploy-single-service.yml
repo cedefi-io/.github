@@ -1,0 +1,114 @@
+name: Deploy Single Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to deploy'
+        required: true
+        type: choice
+        options:
+          - cedefi-api
+          - cedefi-order
+          - cedefi-job
+          - cedefi-evm-indexer
+          - cedefi-evm-trade
+          - cedefi-solana-indexer
+          - cedefi-solana-trade
+          - cedefi-solana-ticks
+          - cedefi-kline-compose
+          - cedefi-rpc
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+      tag:
+        description: 'Image tag (leave empty for latest commit)'
+        required: false
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER_NAME: ${{ secrets.GKE_CLUSTER_NAME }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  REGISTRY: gcr.io
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.event.inputs.service }} to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Generate Image Tag
+        id: image-tag
+        run: |
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            echo "tag=${{ github.event.inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ github.event.inputs.service }}
+          file: ./${{ github.event.inputs.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ github.event.inputs.service }}:${{ steps.image-tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ github.event.inputs.service }}:${{ github.event.inputs.environment }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} \
+            --zone ${{ env.GKE_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+
+      - name: Update Deployment
+        run: |
+          SERVICE=${{ github.event.inputs.service }}
+          ENV=${{ github.event.inputs.environment }}
+          IMAGE="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${SERVICE}:${{ steps.image-tag.outputs.tag }}"
+          
+          # Update deployment image
+          kubectl set image deployment/${SERVICE} ${SERVICE}=${IMAGE} -n cedefi-${ENV}
+          
+          # Wait for rollout
+          kubectl rollout status deployment/${SERVICE} -n cedefi-${ENV} --timeout=5m
+
+      - name: Verify Deployment
+        run: |
+          SERVICE=${{ github.event.inputs.service }}
+          ENV=${{ github.event.inputs.environment }}
+          
+          echo "## Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: ${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${ENV}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${SERVICE}:${{ steps.image-tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          kubectl get pods -l app=${SERVICE} -n cedefi-${ENV}
+          kubectl describe deployment ${SERVICE} -n cedefi-${ENV}
