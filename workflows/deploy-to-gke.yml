@@ -180,31 +180,31 @@ jobs:
             K8S_BASE="k8s-script-dev/deploy/cedefi"
           fi
           
-          # Create namespace if not exists
-          kubectl create namespace cedefi-$ENV --dry-run=client -o yaml | kubectl apply -f -
+          # Create namespace if not exists (using fixed 'cedefi' namespace)
+          kubectl create namespace cedefi --dry-run=client -o yaml | kubectl apply -f -
           
-          # Apply configurations in order
+          # Apply configurations in order (all configs already have namespace: cedefi)
           if [[ -d "$K8S_BASE" ]]; then
-            [[ -d "$K8S_BASE/configmap" ]] && kubectl apply -f $K8S_BASE/configmap/ -n cedefi-$ENV || true
-            [[ -d "$K8S_BASE/secret" ]] && kubectl apply -f $K8S_BASE/secret/ -n cedefi-$ENV || true
-            [[ -d "$K8S_BASE/deployment" ]] && kubectl apply -f $K8S_BASE/deployment/ -n cedefi-$ENV
-            [[ -d "$K8S_BASE/service" ]] && kubectl apply -f $K8S_BASE/service/ -n cedefi-$ENV || true
-            [[ -d "$K8S_BASE/ingress" ]] && kubectl apply -f $K8S_BASE/ingress/ -n cedefi-$ENV || true
+            [[ -d "$K8S_BASE/configmap" ]] && kubectl apply -f $K8S_BASE/configmap/ || true
+            [[ -d "$K8S_BASE/secret" ]] && kubectl apply -f $K8S_BASE/secret/ || true
+            [[ -d "$K8S_BASE/deployment" ]] && kubectl apply -f $K8S_BASE/deployment/
+            [[ -d "$K8S_BASE/service" ]] && kubectl apply -f $K8S_BASE/service/ || true
+            [[ -d "$K8S_BASE/ingress" ]] && kubectl apply -f $K8S_BASE/ingress/ || true
           fi
 
       - name: Verify Deployment
         run: |
-          ENV=${{ needs.setup.outputs.environment }}
-          kubectl rollout status deployment -n cedefi-$ENV --timeout=5m || true
-          kubectl get pods -n cedefi-$ENV
-          kubectl get svc -n cedefi-$ENV
+          kubectl rollout status deployment -n cedefi --timeout=5m || true
+          kubectl get pods -n cedefi
+          kubectl get svc -n cedefi
 
       - name: Deployment Summary
         run: |
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **GKE Cluster**: ${{ env.GKE_CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Namespace**: cedefi" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Deployed Services" >> $GITHUB_STEP_SUMMARY
-          kubectl get deployments -n cedefi-${{ needs.setup.outputs.environment }} -o wide >> $GITHUB_STEP_SUMMARY || true
+          kubectl get deployments -n cedefi -o wide >> $GITHUB_STEP_SUMMARY || true
