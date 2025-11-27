@@ -1,0 +1,134 @@
+name: Reusable Build and Deploy to GKE
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: 'Service name (e.g., cedefi-api)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: string
+      dockerfile-path:
+        description: 'Path to Dockerfile (default: ./Dockerfile)'
+        required: false
+        type: string
+        default: './Dockerfile'
+      build-context:
+        description: 'Docker build context (default: .)'
+        required: false
+        type: string
+        default: '.'
+      k8s-manifests-path:
+        description: 'Path to k8s manifests (optional)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      GCP_PROJECT_ID:
+        required: true
+      GCP_SA_KEY:
+        required: true
+      GKE_CLUSTER_NAME:
+        required: true
+      GKE_REGION:
+        required: true
+
+env:
+  REGISTRY: gcr.io
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy ${{ inputs.service-name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Generate Image Tag
+        id: image-tag
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "tag=${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "short_tag=${{ inputs.environment }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.build-context }}
+          file: ${{ inputs.dockerfile-path }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ steps.image-tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ steps.image-tag.outputs.short_tag }}
+            ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ inputs.environment }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.image-tag.outputs.tag }}
+            BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            GIT_COMMIT=${{ github.sha }}
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER_NAME }} \
+            --region ${{ secrets.GKE_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Create Namespace
+        run: |
+          kubectl create namespace cedefi --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy with kubectl (if manifests provided)
+        if: inputs.k8s-manifests-path != ''
+        run: |
+          kubectl apply -f ${{ inputs.k8s-manifests-path }}
+
+      - name: Update Deployment Image (fallback)
+        if: inputs.k8s-manifests-path == ''
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ steps.image-tag.outputs.tag }}"
+          
+          # Check if deployment exists
+          if kubectl get deployment ${{ inputs.service-name }} -n cedefi 2>/dev/null; then
+            echo "Updating existing deployment..."
+            kubectl set image deployment/${{ inputs.service-name }} \
+              ${{ inputs.service-name }}=${IMAGE} \
+              -n cedefi
+            kubectl rollout status deployment/${{ inputs.service-name }} -n cedefi --timeout=5m
+          else
+            echo "⚠️  Deployment not found. Please provide k8s-manifests-path or create deployment manually."
+            echo "Image built and pushed: ${IMAGE}"
+          fi
+
+      - name: Verify Deployment
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: ${{ inputs.service-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ steps.image-tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n cedefi -l app=${{ inputs.service-name }} >> $GITHUB_STEP_SUMMARY || true

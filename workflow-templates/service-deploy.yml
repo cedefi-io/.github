@@ -1,0 +1,53 @@
+# 服务部署工作流模板
+# 将此文件复制到各个服务仓库的 .github/workflows/ 目录
+# 根据实际情况修改 service-name 和其他参数
+
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+
+jobs:
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-deploy:
+    needs: determine-environment
+    uses: cedefi-io/.github/.github/workflows/reusable-build-deploy.yml@main
+    with:
+      service-name: SERVICE_NAME_HERE  # ⚠️ 修改为实际服务名，如: cedefi-api
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      dockerfile-path: ./Dockerfile
+      build-context: .
+      k8s-manifests-path: ''  # 可选：指定 k8s 配置文件路径，如 ./k8s/
+    secrets:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GKE_CLUSTER_NAME: ${{ secrets.GKE_CLUSTER_NAME }}
+      GKE_REGION: ${{ secrets.GKE_REGION }}
