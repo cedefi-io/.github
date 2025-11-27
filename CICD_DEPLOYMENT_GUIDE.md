@@ -39,9 +39,9 @@ gcloud iam service-accounts keys create key.json \
 | Secret 名称 | 描述 | 示例值 |
 |------------|------|--------|
 | `GCP_SA_KEY` | GCP 服务账号 JSON 密钥（完整内容） | `{"type": "service_account",...}` |
-| `GCP_PROJECT_ID` | GCP 项目 ID | `cedefi-prod-123456` |
-| `GKE_CLUSTER_NAME` | GKE 集群名称 | `cedefi-cluster` |
-| `GKE_ZONE` | GKE 集群区域 | `us-central1-a` |
+| `GCP_PROJECT_ID` | GCP 项目 ID | `cedefi-479416` |
+| `GKE_CLUSTER_NAME` | GKE 集群名称 | `cedefi-cluster-1` |
+| `GKE_REGION` | GKE 集群区域（regional cluster） | `asia-east1` |
 
 配置路径：仓库 Settings → Secrets and variables → Actions → New repository secret
 

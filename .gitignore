@@ -1,0 +1,2 @@
+scripts/gcp-key-*.json
+scripts/gke-gcloud-auth-plugin

@@ -41,7 +41,7 @@ read_config() {
     
     read -p "GCP Project ID: " PROJECT_ID
     read -p "GKE Cluster Name: " CLUSTER_NAME
-    read -p "GKE Zone (例如: us-central1-a): " ZONE
+    read -p "GKE Region (例如: asia-east1 for regional cluster): " REGION
     read -p "Service Account Name (默认: github-actions-sa): " SA_NAME
     SA_NAME=${SA_NAME:-github-actions-sa}
     
@@ -49,7 +49,7 @@ read_config() {
     echo "配置信息:"
     echo "- Project ID: $PROJECT_ID"
     echo "- Cluster Name: $CLUSTER_NAME"
-    echo "- Zone: $ZONE"
+    echo "- Region: $REGION"
     echo "- Service Account: $SA_NAME"
     echo
     
@@ -150,8 +150,8 @@ configure_github_secrets() {
     echo -e "${YELLOW}名称: GKE_CLUSTER_NAME${NC}"
     echo "值: $CLUSTER_NAME"
     echo
-    echo -e "${YELLOW}名称: GKE_ZONE${NC}"
-    echo "值: $ZONE"
+    echo -e "${YELLOW}名称: GKE_REGION${NC}"
+    echo "值: $REGION"
     echo
 }
 
@@ -165,7 +165,7 @@ create_namespaces() {
     # 获取 GKE 凭证
     echo "获取 GKE 集群凭证..."
     gcloud container clusters get-credentials $CLUSTER_NAME \
-        --zone $ZONE \
+        --region $REGION \
         --project $PROJECT_ID
     
     # 创建 namespaces
@@ -195,7 +195,7 @@ verify_setup() {
     
     echo "检查 GKE 集群..."
     gcloud container clusters describe $CLUSTER_NAME \
-        --zone $ZONE \
+        --region $REGION \
         --project $PROJECT_ID > /dev/null 2>&1 && echo -e "${GREEN}✓ GKE 集群可访问${NC}"
     
     echo "检查 Kubernetes namespaces..."

@@ -33,7 +33,7 @@ on:
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GKE_CLUSTER_NAME: ${{ secrets.GKE_CLUSTER_NAME }}
-  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  GKE_REGION: ${{ secrets.GKE_REGION }}
   REGISTRY: gcr.io
 
 jobs:
@@ -84,7 +84,7 @@ jobs:
       - name: Get GKE Credentials
         run: |
           gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} \
-            --zone ${{ env.GKE_ZONE }} \
+            --region ${{ env.GKE_REGION }} \
             --project ${{ env.GCP_PROJECT_ID }}
 
       - name: Update Deployment
