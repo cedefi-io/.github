@@ -94,9 +94,12 @@ jobs:
 
       - name: Get GKE Credentials
         run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
           gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER_NAME }} \
             --region ${{ secrets.GKE_REGION }} \
             --project ${{ secrets.GCP_PROJECT_ID }}
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
@@ -104,11 +107,15 @@ jobs:
       - name: Create Namespace
         run: |
           kubectl create namespace cedefi --dry-run=client -o yaml | kubectl apply -f -
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
 
       - name: Deploy with kubectl (if manifests provided)
         if: inputs.k8s-manifests-path != ''
         run: |
           kubectl apply -f ${{ inputs.k8s-manifests-path }}
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
 
       - name: Update Deployment Image (fallback)
         if: inputs.k8s-manifests-path == ''
@@ -126,6 +133,8 @@ jobs:
             echo "⚠️  Deployment not found. Please provide k8s-manifests-path or create deployment manually."
             echo "Image built and pushed: ${IMAGE}"
           fi
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
 
       - name: Verify Deployment
         run: |
@@ -136,3 +145,5 @@ jobs:
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           kubectl get pods -n cedefi -l app=${{ inputs.service-name }} >> $GITHUB_STEP_SUMMARY || true
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
