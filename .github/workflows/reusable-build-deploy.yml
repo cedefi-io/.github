@@ -110,29 +110,76 @@ jobs:
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: True
 
+      - name: Checkout K8s Config Repository
+        uses: actions/checkout@v4
+        with:
+          repository: cedefi-io/cedefi-k8s-config
+          token: ${{ secrets.GITHUB_TOKEN_PRIVATE }}
+          path: k8s-config
+
+      - name: Deploy ConfigMap
+        run: |
+          CONFIG_FILE="k8s-config/deploy/cedefi/configmap/${{ inputs.service-name }}-configmap.yaml"
+          if [ -f "$CONFIG_FILE" ]; then
+            echo "Applying ConfigMap from $CONFIG_FILE"
+            kubectl apply -f "$CONFIG_FILE" -n cedefi
+          else
+            echo "ConfigMap file not found: $CONFIG_FILE (skipping)"
+          fi
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
+
+      - name: Deploy Service
+        run: |
+          SERVICE_FILE="k8s-config/deploy/cedefi/service/${{ inputs.service-name }}-service.yaml"
+          if [ -f "$SERVICE_FILE" ]; then
+            echo "Applying Service from $SERVICE_FILE"
+            kubectl apply -f "$SERVICE_FILE" -n cedefi
+          else
+            echo "Service file not found: $SERVICE_FILE (skipping)"
+          fi
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
+
+      - name: Deploy or Update Deployment
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ steps.image-tag.outputs.tag }}"
+          DEPLOY_FILE="k8s-config/deploy/cedefi/deployment/${{ inputs.service-name }}-deployment.yaml"
+          
+          if [ -f "$DEPLOY_FILE" ]; then
+            echo "Found deployment file: $DEPLOY_FILE"
+            # Update image in deployment file
+            sed -i "s|image:.*${{ inputs.service-name }}.*|image: ${IMAGE}|g" "$DEPLOY_FILE"
+            # Remove cluster-specific metadata
+            sed -i '/resourceVersion:/d' "$DEPLOY_FILE"
+            sed -i '/uid:/d' "$DEPLOY_FILE"
+            sed -i '/creationTimestamp:/d' "$DEPLOY_FILE"
+            sed -i '/generation:/d' "$DEPLOY_FILE"
+            # Apply deployment
+            kubectl apply -f "$DEPLOY_FILE" -n cedefi
+            echo "Waiting for rollout..."
+            kubectl rollout status deployment/${{ inputs.service-name }} -n cedefi --timeout=5m
+          else
+            echo "⚠️  Deployment file not found: $DEPLOY_FILE"
+            # Fallback: try to update existing deployment
+            if kubectl get deployment ${{ inputs.service-name }} -n cedefi 2>/dev/null; then
+              echo "Updating existing deployment image..."
+              kubectl set image deployment/${{ inputs.service-name }} \
+                ${{ inputs.service-name }}=${IMAGE} \
+                -n cedefi
+              kubectl rollout status deployment/${{ inputs.service-name }} -n cedefi --timeout=5m
+            else
+              echo "❌ No deployment file and no existing deployment found."
+              echo "Image built and pushed: ${IMAGE}"
+            fi
+          fi
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: True
+
       - name: Deploy with kubectl (if manifests provided)
         if: inputs.k8s-manifests-path != ''
         run: |
           kubectl apply -f ${{ inputs.k8s-manifests-path }}
-        env:
-          USE_GKE_GCLOUD_AUTH_PLUGIN: True
-
-      - name: Update Deployment Image (fallback)
-        if: inputs.k8s-manifests-path == ''
-        run: |
-          IMAGE="${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ steps.image-tag.outputs.tag }}"
-          
-          # Check if deployment exists
-          if kubectl get deployment ${{ inputs.service-name }} -n cedefi 2>/dev/null; then
-            echo "Updating existing deployment..."
-            kubectl set image deployment/${{ inputs.service-name }} \
-              ${{ inputs.service-name }}=${IMAGE} \
-              -n cedefi
-            kubectl rollout status deployment/${{ inputs.service-name }} -n cedefi --timeout=5m
-          else
-            echo "⚠️  Deployment not found. Please provide k8s-manifests-path or create deployment manually."
-            echo "Image built and pushed: ${IMAGE}"
-          fi
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: True
 
