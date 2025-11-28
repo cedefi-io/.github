@@ -35,6 +35,9 @@ on:
         required: true
       GKE_REGION:
         required: true
+      GITHUB_TOKEN_PRIVATE:
+        required: false
+        description: 'GitHub token for accessing private repositories'
 
 env:
   REGISTRY: gcr.io
@@ -84,6 +87,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN_PRIVATE }}
             VERSION=${{ steps.image-tag.outputs.tag }}
             BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             GIT_COMMIT=${{ github.sha }}
