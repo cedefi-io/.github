@@ -6,16 +6,18 @@ on:
       - main
       - dev
     paths:
+      - 'cedefi-admin/**'
       - 'cedefi-api/**'
+      - 'cedefi-openapi/**'
       - 'cedefi-order/**'
       - 'cedefi-job/**'
       - 'cedefi-evm-indexer/**'
-      - 'cedefi-evm-trade/**'
+      - 'cedefi-evm-indexer-server/**'
       - 'cedefi-solana-indexer/**'
-      - 'cedefi-solana-trade/**'
+      - 'cedefi-solana-indexer-server/**'
       - 'cedefi-solana-ticks/**'
       - 'cedefi-kline-compose/**'
-      - 'cedefi-rpc/**'
+      - 'cedefi-monitor/**'
       - 'k8s-script-*/**'
       - '.github/workflows/deploy-to-gke.yml'
   workflow_dispatch:
@@ -65,7 +67,7 @@ jobs:
       - name: Get Changed Services
         id: set-matrix
         run: |
-          ALL_SERVICES='["cedefi-api","cedefi-order","cedefi-job","cedefi-evm-indexer","cedefi-evm-trade","cedefi-solana-indexer","cedefi-solana-trade","cedefi-solana-ticks","cedefi-kline-compose","cedefi-rpc"]'
+          ALL_SERVICES='["cedefi-admin","cedefi-api","cedefi-openapi","cedefi-order","cedefi-job","cedefi-evm-indexer","cedefi-evm-indexer-server","cedefi-solana-indexer","cedefi-solana-indexer-server","cedefi-solana-ticks","cedefi-kline-compose","cedefi-monitor"]'
           
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             if [[ "${{ github.event.inputs.service }}" == "all" ]]; then
@@ -75,7 +77,7 @@ jobs:
             fi
           else
             CHANGED_SERVICES='[]'
-            for service in cedefi-api cedefi-order cedefi-job cedefi-evm-indexer cedefi-evm-trade cedefi-solana-indexer cedefi-solana-trade cedefi-solana-ticks cedefi-kline-compose cedefi-rpc; do
+            for service in cedefi-admin cedefi-api cedefi-openapi cedefi-order cedefi-job cedefi-evm-indexer cedefi-evm-indexer-server cedefi-solana-indexer cedefi-solana-indexer-server cedefi-solana-ticks cedefi-kline-compose cedefi-monitor; do
               if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "^${service}/"; then
                 CHANGED_SERVICES=$(echo $CHANGED_SERVICES | jq -c ". += [\"$service\"]")
               fi

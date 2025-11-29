@@ -8,16 +8,18 @@ on:
         required: true
         type: choice
         options:
+          - cedefi-admin
           - cedefi-api
+          - cedefi-openapi
           - cedefi-order
           - cedefi-job
           - cedefi-evm-indexer
-          - cedefi-evm-trade
+          - cedefi-evm-indexer-server
           - cedefi-solana-indexer
-          - cedefi-solana-trade
+          - cedefi-solana-indexer-server
           - cedefi-solana-ticks
           - cedefi-kline-compose
-          - cedefi-rpc
+          - cedefi-monitor
       environment:
         description: 'Environment'
         required: true
