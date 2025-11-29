@@ -104,18 +104,18 @@ jobs:
             --zone=${{ inputs.gce-zone }} \
             --project=${{ secrets.GCP_PROJECT_ID }} \
             --command="
-              # Configure docker for GCR
-              gcloud auth configure-docker gcr.io --quiet 2>/dev/null || true
+              # Configure docker for GCR (using sudo)
+              sudo gcloud auth configure-docker gcr.io --quiet 2>/dev/null || true
               
               # Pull latest image
-              docker pull ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ inputs.environment }}-latest
+              sudo docker pull ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ inputs.environment }}-latest
               
               # Stop and remove existing container
-              docker stop ${{ inputs.service-name }} 2>/dev/null || true
-              docker rm ${{ inputs.service-name }} 2>/dev/null || true
+              sudo docker stop ${{ inputs.service-name }} 2>/dev/null || true
+              sudo docker rm ${{ inputs.service-name }} 2>/dev/null || true
               
               # Run new container
-              docker run -d \
+              sudo docker run -d \
                 --name ${{ inputs.service-name }} \
                 --restart=unless-stopped \
                 -e ENV=${{ inputs.environment }} \
@@ -124,7 +124,7 @@ jobs:
                 ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.service-name }}:${{ inputs.environment }}-latest
               
               # Clean up old images
-              docker image prune -f
+              sudo docker image prune -f
             "
 
       - name: Verify Deployment
@@ -133,4 +133,4 @@ jobs:
           gcloud compute ssh ${{ inputs.gce-instance }} \
             --zone=${{ inputs.gce-zone }} \
             --project=${{ secrets.GCP_PROJECT_ID }} \
-            --command="docker ps --filter name=${{ inputs.service-name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+            --command="sudo docker ps --filter name=${{ inputs.service-name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
